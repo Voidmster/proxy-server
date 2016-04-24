@@ -12,36 +12,16 @@
 #include <stdexcept>
 #include <netdb.h>
 #include <string.h>
+#include <fcntl.h>
 
-int create_socket(int domain, int type) {
-    int socket_fd = socket(domain, type, 0);
-    if (socket_fd == -1) {
-        throw std::runtime_error("Crash in create_socket");
-    }
-    return socket_fd;
-}
+int create_socket(int domain, int type);
 
-void listen_socket(int socket_fd) {
-    if (listen(socket_fd, SOMAXCONN) == -1) {
-        throw std::runtime_error("Crash in listen_socket");
-    }
-}
+void listen_socket(int socket_fd);
 
-void bind_socket(int socket_fd, sa_family_t sin_family, in_addr_t s_addr, uint16_t port) {
-    struct sockaddr_in hits;
+void bind_socket(int socket_fd, sa_family_t sin_family, in_addr_t s_addr, uint16_t port);
 
-    memset(&hits, 0, sizeof hits);
+int get_flags(int socket_fd);
 
-    hits.sin_family = sin_family;
-    hits.sin_addr.s_addr = s_addr;
-    hits.sin_port = port;
-
-
-    if (bind(socket_fd, (struct sockaddr *) &hits, sizeof hits) < 0) {
-        printf("Error #%d\n", errno);
-        throw std::runtime_error("Crash in bind_socket");
-    }
-}
-
+void set_flags(int socket_fd, int new_flags);
 
 #endif //PROXY_POSIX_SOCKET_H
