@@ -1,27 +1,38 @@
-//
-// Created by daniil on 23.04.16.
-//
-
 #ifndef PROXY_POSIX_SOCKET_H
 #define PROXY_POSIX_SOCKET_H
 
-#include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <unistd.h>
-#include <cstdio>
 #include <stdexcept>
-#include <netdb.h>
-#include <string.h>
 #include <fcntl.h>
+#include <netdb.h>
+#include "utils.h"
+#include "file_descriptor.h"
 
-int create_socket(int domain, int type);
+class posix_socket {
+public:
+    posix_socket();
+    posix_socket(int accepted_fd);
+    posix_socket(int domain, int type);
+    void bind(sa_family_t sa_family, in_addr_t s_addr, uint16_t port);
+    void listen();
+    void connect(sockaddr *adr, socklen_t addrlen);
+    int accept();
+    int get_flags();
+    int get_available_bytes();
+    int read_input(std::string &s);
 
-void listen_socket(int socket_fd);
+    ssize_t read_some(void *buffer, size_t size);
+    void write(std::string const &);
+    void write(const char *buffer, size_t size);
+    void set_flags(int nex_flags);
+    file_descriptor& get_fd();
+    ~posix_socket();
+private:
+    int create_socket_fd(int domain, int type);
+    file_descriptor fd;
+};
 
-void bind_socket(int socket_fd, sa_family_t sin_family, in_addr_t s_addr, uint16_t port);
-
-int get_flags(int socket_fd);
-
-void set_flags(int socket_fd, int new_flags);
 
 #endif //PROXY_POSIX_SOCKET_H
