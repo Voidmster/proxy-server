@@ -66,15 +66,24 @@ void io_service::run() {
         this->finish = true;
     });
 
+    epoll_event events[MAX_EPOLL_EVENTS_COUNT];
+
     while (!finish) {
-        epoll_event events[1000];
-        int count = epoll_wait(epoll_fd, events, 128, -1);
-        if (count < 0) {
-            throw_error("Error in epoll_wait");
-            break;
+        int count;
+        int timeout = timeService.time_to_nearest_timeout();
+        if (timeout == -1) {
+            timeout = DEFAULT_EPOLL_TIMEOUT;
         }
 
-        //std::cerr << "Count of io_events : " << count << "\n";
+        count = epoll_wait(epoll_fd, events, MAX_EPOLL_EVENTS_COUNT, timeout);
+
+        if (count < 0) {
+            if (errno != EINTR) {
+                throw_error("Error in epoll_wait");
+            } else {
+                break;
+            }
+        }
 
         for (int i = 0; i < count; i++) {
             auto &ev = events[i];
@@ -83,15 +92,19 @@ void io_service::run() {
                 if (available.find(x) != available.end()) {
                     x->callback(ev.events);
                 } else {
-                    std::cerr << "Io_event " << x << " is dead\n";
+                    //std::cerr << "Io_event " << x << " is dead\n";
                 }
             } catch (std::exception &e) {
                 std::cerr << e.what();
             }
         }
-        //std::cerr << "\n";
     }
 }
+
+time_service &io_service::get_time_service() {
+    return timeService;
+}
+
 
 io_event::io_event(io_service &service, file_descriptor &fd, uint32_t flags, std::function<void(uint32_t)> callback)
         : service(service),
@@ -99,7 +112,6 @@ io_event::io_event(io_service &service, file_descriptor &fd, uint32_t flags, std
           callback(callback)
 {
     service.add(fd, this, flags);
-    //std::cerr << "> Io_entry created\n";
 }
 
 void io_event::modify(uint32_t flags) {
@@ -108,7 +120,6 @@ void io_event::modify(uint32_t flags) {
 
 io_event::~io_event() {
     service.remove(fd, this, 0);
-    //std::cerr << "> Io_entry destroyed\n";
 }
 
 

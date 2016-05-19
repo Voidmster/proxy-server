@@ -43,7 +43,7 @@ int posix_socket::accept() {
     if (result == -1) {
         throw_error("Error in accept posix_socket");
     }
-    std::cerr << "Socket accepted : " << result << "\n";
+
     return result;
 }
 
@@ -107,7 +107,7 @@ int posix_socket::read_input(std::string &s) {
     try {
         int n = get_available_bytes();
         if (n == 0) {
-            std::cerr << "No bytes are available\n";
+            //No bytes are available
             return -1;
         }
 

@@ -13,28 +13,36 @@
 #include "io_service.h"
 
 
+#define SOCKET_TIMEOUT std::chrono::seconds(600)
+#define CONNECTION_TIMEOUT std::chrono::seconds(180)
+
 class left_side;
 class right_side;
 
 class proxy_server {
     friend class right_side;
 public:
-    proxy_server(io_service &service, ipv4_endpoint endpoint);
+    proxy_server(ipv4_endpoint endpoint);
     posix_socket& get_server();
     io_service& get_service();
 
     dns_resolver& get_resolver();
 
     void create_new_left_side();
+    void run();
+
     right_side* create_new_right_side(left_side*);
 private:
     dns_resolver resolver;
-    io_service& service;
+    io_service service;
     http_server server;
     ipv4_endpoint endpoint;
     std::map<left_side*, std::unique_ptr <left_side> > left_sides;
     std::map<right_side*, std::unique_ptr <right_side> > right_sides;
     lru_cache<std::string, http_response> proxy_cache;
+
+    int left_side_counter;
+    int right_side_counter;
 };
 
 class left_side {
@@ -61,6 +69,7 @@ private:
     bool on_write;
 
     std::set<right_side *> connected;
+    timer left_side_timer;
 };
 
 class right_side {
@@ -95,6 +104,7 @@ private:
     std::string host;
     std::string URI;
     bool read_after_cache_hit = false;
+    timer right_side_timer;
 };
 
 #endif //PROXY_PROXY_H

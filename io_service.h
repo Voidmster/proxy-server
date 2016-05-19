@@ -9,6 +9,10 @@
 #include <vector>
 #include "utils.h"
 #include "posix_socket.h"
+#include "time_service.h"
+
+#define DEFAULT_EPOLL_TIMEOUT 1000
+#define MAX_EPOLL_EVENTS_COUNT 1000
 
 class io_event;
 class io_service {
@@ -21,6 +25,7 @@ public:
     void modify(file_descriptor & fd, io_event* event, uint32_t flags);
 
     file_descriptor create_signal_fd(std::vector<uint8_t> signals);
+    time_service& get_time_service();
 
     void run();
     ~io_service();
@@ -29,6 +34,7 @@ private:
     bool finish;
     void control(int op, int fd, io_event *event, uint32_t flags);
     std::set<io_event*> available;
+    time_service timeService;
 };
 
 class io_event{

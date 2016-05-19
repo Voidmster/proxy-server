@@ -10,10 +10,14 @@ template<typename key_t, typename value_t>
 class lru_cache {
     typedef typename std::pair<key_t, value_t> pair_t;
 public:
-    lru_cache(size_t _size) : max_size(_size) {};
+    lru_cache(std::string message, size_t _size) : message(message) ,max_size(_size) {};
     ~lru_cache() {};
 
     void put(const key_t &key, const value_t &value) {
+        if (size() % 10 == 0) {
+            std::cerr << "> " << size()  << message << '\n';
+        }
+
         remove(key);
         cached_items_list.push_front(pair_t(key, value));
         cached_items_map[key] = cached_items_list.begin();
@@ -53,6 +57,7 @@ public:
     }
 private:
     size_t  max_size;
+    std::string message;
     std::list<pair_t> cached_items_list;
     std::unordered_map<key_t, decltype(cached_items_list.begin())> cached_items_map;
 };

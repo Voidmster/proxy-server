@@ -2,12 +2,13 @@
 #include <bits/unique_ptr.h>
 #include "proxy_server.h"
 
-proxy_server::proxy_server(io_service &service, ipv4_endpoint endpoint)
-        : service(service),
-          endpoint(endpoint),
+proxy_server::proxy_server(ipv4_endpoint endpoint)
+        : endpoint(endpoint),
           server(service, endpoint, std::bind(&proxy_server::create_new_left_side, this)),
           resolver(5),
-          proxy_cache(10000)
+          proxy_cache(" pages cached", 10000),
+          left_side_counter(0),
+          right_side_counter(0)
 {
     std::cerr << "Proxy server bind on " << server.get_local_endpoint().to_string() << "\n";
 }
@@ -24,12 +25,19 @@ void proxy_server::create_new_left_side() {
     std::unique_ptr<left_side> u_ptr(new left_side(this, [this](left_side* item) {left_sides.erase(item);}));
     left_side *ptr = u_ptr.get();
     left_sides.emplace(ptr, std::move(u_ptr));
+    if (++left_side_counter % 10 == 0) {
+        std::cerr << "> " << left_side_counter  << " left_sides created\n";
+    }
+
 }
 
 right_side *proxy_server::create_new_right_side(left_side *caller) {
     std::unique_ptr<right_side> u_ptr(new right_side(this, caller, [this](right_side* item) {right_sides.erase(item);}));
     right_side *ptr = u_ptr.get();
     right_sides.emplace(ptr, std::move(u_ptr));
+    if (++right_side_counter % 10 == 0) {
+        std::cerr << "> " << right_side_counter  << " right_sides created\n";
+    }
     return ptr;
 }
 
@@ -37,6 +45,9 @@ dns_resolver &proxy_server::get_resolver() {
     return resolver;
 }
 
+void proxy_server::run() {
+    service.run();
+}
 
 left_side::left_side(proxy_server *proxy, std::function<void(left_side*)> on_disconnect)
         : proxy(proxy),
@@ -44,7 +55,6 @@ left_side::left_side(proxy_server *proxy, std::function<void(left_side*)> on_dis
           partner(nullptr),
           ioEvent(proxy->get_service(), socket.get_fd(), EPOLLIN, [this] (uint32_t events) mutable throw(std::runtime_error)
           {
-              //std::cerr << "In left side of " << this << ":" << epoll_event_to_str(events) << "\n";
               if (events & EPOLLIN) {
                   if (read_request()) { return;}
               }
@@ -58,9 +68,11 @@ left_side::left_side(proxy_server *proxy, std::function<void(left_side*)> on_dis
           }),
           on_disconnect(on_disconnect),
           on_read(true),
-          on_write(false)
+          on_write(false),
+          left_side_timer(proxy->get_service().get_time_service(), SOCKET_TIMEOUT, [this]() {
+              this->on_disconnect(this);
+          })
 {
-    //std::cerr << "> Left_side created\n";
 }
 
 left_side::~left_side() {
@@ -68,7 +80,6 @@ left_side::~left_side() {
         (*connected.begin())->on_disconnect(*connected.begin());
     }
     connected.clear();
-    //std::cerr << "> Left_side destroyed\n";
 }
 
 int left_side::read_request() {
@@ -91,6 +102,7 @@ int left_side::read_request() {
         partner = proxy->create_new_right_side(this);
         connected.insert(partner);
         request.release();
+        left_side_timer.change_time(SOCKET_TIMEOUT);
     }
     return 0;
 }
@@ -133,8 +145,6 @@ right_side::right_side(proxy_server *proxy, left_side *partner, std::function<vo
           partner(partner),
           ioEvent(proxy->get_service(), socket.get_fd(), 0, [this] (uint32_t events) mutable throw(std::runtime_error)
           {
-       //       std::cerr << "In right of " << this << ":" << epoll_event_to_str(events) << "\n";
-//              std::cerr << "My URI is " << request->get_URI() << "\n";
               if (!connected && (events == EPOLLHUP)) {
                   create_connection();
                   return;
@@ -156,10 +166,12 @@ right_side::right_side(proxy_server *proxy, left_side *partner, std::function<vo
           proxy(proxy),
           connected(false),
           request(std::move(partner->request)),
-          cache_hit(false)
+          cache_hit(false),
+          right_side_timer(proxy->get_service().get_time_service(), CONNECTION_TIMEOUT, [this] {
+              this->on_disconnect(this);
+          })
 {
     resolver_id = this->proxy->get_resolver().resolve(request->get_host());
-    std::cerr << "> Right_side created\n";
 }
 
 right_side::~right_side() {
@@ -173,7 +185,6 @@ right_side::~right_side() {
         proxy->get_resolver().cancel(resolver_id);
     }
     try_cache();
-    std::cerr << "> Right_side destroyed\n";
 }
 
 
@@ -195,12 +206,12 @@ void right_side::create_connection() {
 
 void right_side::send_request() {
     if (partner != nullptr) {
+        right_side_timer.stop();
         host = request->get_host();
         URI = request->get_URI();
         auto is_valid = request->is_validating();
         cache_hit = proxy->proxy_cache.contains(host + URI);
         if (!is_valid && cache_hit) {
-            std::cerr << "Proxy cache hit\n";
             auto cache_entry = proxy->proxy_cache.get(host + URI);
             auto etag = cache_entry.get_header("Etag");
             request->append_header("If-None-Match", etag);
@@ -232,18 +243,16 @@ int right_side::read_response() {
 
             if (response->get_state() >= http_request::FIRST_LINE) {
                 if (response->get_code() == "304" && cache_hit) {
-                    std::cerr << "Valid cache for " << host << " " << URI << "\n";
                     partner->messages.push(proxy->proxy_cache.get(host + URI).get_text());
                     read_after_cache_hit = true;
                 } else {
-                    std::cerr << "Not valid cache for " << host << " " << URI << "\n";
                     cache_hit = false;
                     partner->messages.push(sub);
                 }
                 partner->set_on_write(true);
             }
         } else {
-            std::cerr << "Read after get cache\n";
+            //Read after get cache
         }
         return 0;
     } else {
@@ -277,7 +286,6 @@ void right_side::set_on_write(bool state) {
 void right_side::try_cache() {
     if (response && response->is_cacheable() && !cache_hit) {
         proxy->proxy_cache.put(host + URI, http_response(*response));
-        std::cerr << "!!!" << host + URI << " cached\n";
     }
 }
 

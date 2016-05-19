@@ -5,7 +5,7 @@
 
 dns_resolver::dns_resolver(size_t threads_count)
         : threads_count(threads_count),
-          dns_cache(1000),
+          dns_cache(" addresses cached", 1000),
           finish(false)
 {
     for (int i = 0; i < threads_count; i++) {
@@ -32,7 +32,6 @@ void dns_resolver::worker() {
         std::unique_lock<std::mutex> cache_locker(cache_mutex);
         bool hit = dns_cache.contains(p.first);
         if (hit) {
-            std::cerr << "!!!DNS CACHE HIT!!!\n";
             auto node = dns_cache.get(p.first);
             if (node.resolved) {
                 x = node.result.first;
