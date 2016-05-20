@@ -55,7 +55,6 @@ public:
     void send_response();
 
     void update_state();
-    void set_on_read(bool state);
     void set_on_write(bool state);
 private:
     proxy_server* proxy;

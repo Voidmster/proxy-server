@@ -80,10 +80,6 @@ int http_wrapper::get_state() {
     return state;
 }
 
-std::string http_wrapper::get_body() const {
-    return body;
-}
-
 std::string http_wrapper::get_text() const {
     return text;
 }

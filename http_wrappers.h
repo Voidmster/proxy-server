@@ -31,6 +31,23 @@ public:
         return request;
     }
 
+    static std::string NOT_FOUND() {
+        std::string request = std::string("HTTP/1.1 404 Not found\r\n");
+        request.append("Server: lol\r\n");
+        request.append("Content-Type: text/html; charset=utf-8\r\n");
+        request.append("Content-Length: 159\r\n");
+        request.append("Connection: close\r\n\r\n");
+        request.append("<html>\r\n");
+        request.append("<head><title>404 Not found</title></head>\r\n");
+        request.append("<body bgcolor=\"white\">\r\n");
+        request.append("<center><h1>404 Not found</h1></center>\r\n");
+        request.append("<hr><center>proxy</center>\r\n");
+        request.append("</body>\r\n");
+        request.append("</html>");
+
+        return request;
+    }
+
     http_wrapper(std::string input) : text(input) { };
     virtual ~http_wrapper() { };
 
@@ -38,7 +55,6 @@ public:
     void add_part(std::string);
     void append_header(std::string name, std::string value);
     std::string get_header(std::string) const;
-    std::string get_body() const;
     std::string get_text() const;
     state_t state = BEFORE;
 protected:

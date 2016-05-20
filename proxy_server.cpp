@@ -130,11 +130,6 @@ void left_side::update_state() {
     ioEvent.modify(flags);
 }
 
-void left_side::set_on_read(bool state) {
-    on_read = state;
-    update_state();
-}
-
 void left_side::set_on_write(bool state) {
     on_write = state;
     update_state();
@@ -168,6 +163,10 @@ right_side::right_side(proxy_server *proxy, left_side *partner, std::function<vo
           request(std::move(partner->request)),
           cache_hit(false),
           right_side_timer(proxy->get_service().get_time_service(), CONNECTION_TIMEOUT, [this] {
+              if (this->partner) {
+                  this->partner->messages.push(http_wrapper::NOT_FOUND());
+                  this->partner->set_on_write(true);
+              }
               this->on_disconnect(this);
           })
 {
