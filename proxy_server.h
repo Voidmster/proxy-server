@@ -13,8 +13,8 @@
 #include "io_service.h"
 
 
-#define SOCKET_TIMEOUT std::chrono::seconds(600)
-#define CONNECTION_TIMEOUT std::chrono::seconds(180)
+const std::chrono::seconds SOCKET_TIMEOUT = std::chrono::seconds(600);
+const std::chrono::seconds CONNECTION_TIMEOUT = std::chrono::seconds(180);
 
 class left_side;
 class right_side;
