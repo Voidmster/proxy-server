@@ -109,14 +109,20 @@ int left_side::read_request() {
 
 void left_side::send_response() {
     while (!messages.empty()) {
-        socket.write(messages.front());
+        ssize_t ind = socket.write_some(messages.front().c_str(), messages.front().size());
+        if (ind != messages.front().size()) {
+            messages.front() = messages.front().substr(ind);
+            break;
+        }
         messages.pop();
     }
 
-    if (partner) {
-        partner->set_on_read(true);
+    if (messages.empty()) {
+        if (partner) {
+            partner->set_on_read(true);
+        }
+        set_on_write(false);
     }
-    set_on_write(false);
 }
 
 void left_side::update_state() {
@@ -205,20 +211,30 @@ void right_side::create_connection() {
 
 void right_side::send_request() {
     if (partner != nullptr) {
-        right_side_timer.stop();
-        host = request->get_host();
-        URI = request->get_URI();
-        auto is_valid = request->is_validating();
-        cache_hit = proxy->proxy_cache.contains(host + URI);
-        if (!is_valid && cache_hit) {
-            auto cache_entry = proxy->proxy_cache.get(host + URI);
-            auto etag = cache_entry.get_header("Etag");
-            request->append_header("If-None-Match", etag);
+        std::string buf;
+        if (rest.empty()) {
+            right_side_timer.stop();
+            host = request->get_host();
+            URI = request->get_URI();
+            auto is_valid = request->is_validating();
+            cache_hit = proxy->proxy_cache.contains(host + URI);
+            if (!is_valid && cache_hit) {
+                auto cache_entry = proxy->proxy_cache.get(host + URI);
+                auto etag = cache_entry.get_header("Etag");
+                request->append_header("If-None-Match", etag);
+            }
+            buf = request->get_request_text();
+        } else {
+            buf = rest;
         }
 
-        socket.write(request->get_request_text());
-        set_on_read(true);
-        set_on_write(false);
+        ssize_t ind = socket.write_some(buf.c_str(), buf.size());
+        if (ind != buf.size()) {
+            rest = buf.substr(ind);
+        } else {
+            set_on_read(true);
+            set_on_write(false);
+        }
     } else {
         on_disconnect(this);
     }
@@ -240,7 +256,7 @@ int right_side::read_response() {
                 response->add_part(sub);
             }
 
-            if (response->get_state() >= http_request::FIRST_LINE) {
+            if (response->get_state() >= http_wrapper::FIRST_LINE) {
                 if (response->get_code() == "304" && cache_hit) {
                     partner->messages.push(proxy->proxy_cache.get(host + URI).get_text());
                     read_after_cache_hit = true;
@@ -249,6 +265,11 @@ int right_side::read_response() {
                     partner->messages.push(sub);
                 }
                 partner->set_on_write(true);
+                set_on_read(false);
+            } else if (response->get_state() == http_wrapper::BAD) {
+                partner->messages.push(sub);
+                partner->set_on_write(true);
+                set_on_read(false);
             }
         } else {
             //Read after get cache

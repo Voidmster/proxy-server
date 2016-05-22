@@ -104,6 +104,7 @@ private:
     std::string URI;
     bool read_after_cache_hit = false;
     timer right_side_timer;
+    std::string rest;
 };
 
 #endif //PROXY_PROXY_H

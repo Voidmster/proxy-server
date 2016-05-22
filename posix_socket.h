@@ -24,8 +24,7 @@ public:
     int read_input(std::string &s);
 
     ssize_t read_some(void *buffer, size_t size);
-    void write(std::string const &);
-    void write(const char *buffer, size_t size);
+    ssize_t write_some(const char *buffer, size_t _size);
     void set_flags(int nex_flags);
     file_descriptor& get_fd();
     ~posix_socket();

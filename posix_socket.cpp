@@ -67,6 +67,18 @@ ssize_t posix_socket::read_some(void *buffer, size_t size) {
     return res;
 }
 
+ssize_t posix_socket::write_some(const char *buffer, size_t size) {
+    ssize_t res = ::write(fd.get_fd(), buffer, size);
+    if (res == -1) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            throw_error("Error in read_some");
+        }
+    }
+
+    return res;
+}
+
+
 file_descriptor& posix_socket::get_fd() {
     return fd;
 }
@@ -85,24 +97,6 @@ void posix_socket::connect(sockaddr *adr, socklen_t addrlen) {
     }
 }
 
-void posix_socket::write(const char *buffer, size_t size) {
-    int total = 0;
-    while (total != size) {
-        ssize_t result = ::write(fd.get_fd(), &buffer[total], size - total);
-        if (result <= 0) {
-            break;
-        }
-        total += result;
-    }
-    if (total != size) {
-        throw_error("Error in posix_socket::write");
-    }
-}
-
-void posix_socket::write(std::string const &s) {
-    write(s.data(), s.size());
-}
-
 int posix_socket::read_input(std::string &s) {
     try {
         int n = get_available_bytes();
@@ -119,7 +113,7 @@ int posix_socket::read_input(std::string &s) {
             return -1;
         }
 
-        s = {buffer, n};
+        s = std::string(buffer, n);
         return 1;
     } catch (std::exception &e) {
         return -1;
@@ -133,6 +127,9 @@ int posix_socket::create_socket_fd(int domain, int type) {
     }
     return r;
 }
+
+
+
 
 
 
