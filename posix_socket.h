@@ -15,7 +15,7 @@ public:
     posix_socket();
     posix_socket(int accepted_fd);
     posix_socket(int domain, int type);
-    void bind(sa_family_t sa_family, in_addr_t s_addr, uint16_t port);
+    void bind(sa_family_t sa_family, uint16_t port, in_addr_t s_addr);
     void listen();
     void connect(sockaddr *adr, socklen_t addrlen);
     int accept();

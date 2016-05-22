@@ -29,7 +29,7 @@ ipv4_endpoint::ipv4_endpoint(uint16_t port_host, ipv4_address addr)
           addr_net(addr.addr_net) {}
 
 uint16_t ipv4_endpoint::port() const {
-    return ntohs(port_net);
+    return port_net;
 }
 
 
@@ -51,6 +51,6 @@ ipv4_endpoint::ipv4_endpoint(uint16_t port_net, uint32_t addr_net)
 std::ostream& operator<<(std::ostream& os, ipv4_endpoint const& endpoint) {
     in_addr tmp;
     tmp.s_addr = endpoint.addr_net;
-    os << inet_ntoa(tmp) << ':' << endpoint.port();
+    os << inet_ntoa(tmp) << ':' << ntohs(endpoint.port());
     return os;
 }

@@ -20,14 +20,14 @@ void posix_socket::set_flags(int nex_flags) {
     }
 }
 
-void posix_socket::bind(sa_family_t sa_family, in_addr_t s_addr, uint16_t port) {
-    struct sockaddr_in hints{};
+void posix_socket::bind(sa_family_t sa_family, uint16_t port, in_addr_t s_addr) {
+    struct sockaddr_in hints;
 
     hints.sin_family = sa_family;
-    hints.sin_addr.s_addr = s_addr;
     hints.sin_port = port;
+    hints.sin_addr.s_addr = s_addr;
 
-    if (::bind(fd.get_fd(), (struct sockaddr*) &hints, sizeof hints) == -1) {
+    if (::bind(fd.get_fd(), (struct sockaddr*) &hints, sizeof (hints)) == -1) {
         throw_error("Error in bind posix_socket");
     }
 }
