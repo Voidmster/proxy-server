@@ -67,8 +67,6 @@ left_side::left_side(proxy_server *proxy, std::function<void(left_side*)> on_dis
 
           }),
           on_disconnect(on_disconnect),
-          on_read(true),
-          on_write(false),
           left_side_timer(proxy->get_service().get_time_service(), SOCKET_TIMEOUT, [this]() {
               this->on_disconnect(this);
           })
@@ -97,7 +95,7 @@ int left_side::read_request() {
 
     if (request->get_state() == http_request::BAD) {
         messages.push(http_wrapper::BAD_REQUEST());
-        set_on_write(true);
+        ioEvent.add_flag(EPOLLOUT);
     } else if (request->get_state() == http_request::FULL_BODY) {
         partner = proxy->create_new_right_side(this);
         connected.insert(partner);
@@ -119,26 +117,10 @@ void left_side::send_response() {
 
     if (messages.empty()) {
         if (partner) {
-            partner->set_on_read(true);
+            partner->ioEvent.add_flag(EPOLLIN);
         }
-        set_on_write(false);
+        ioEvent.remove_flag(EPOLLOUT);
     }
-}
-
-void left_side::update_state() {
-    uint32_t flags = EPOLLERR | EPOLLHUP | EPOLLRDHUP;
-    if (on_read) {
-        flags |= EPOLLIN;
-    }
-    if (on_write) {
-        flags |= EPOLLOUT;
-    }
-    ioEvent.modify(flags);
-}
-
-void left_side::set_on_write(bool state) {
-    on_write = state;
-    update_state();
 }
 
 right_side::right_side(proxy_server *proxy, left_side *partner, std::function<void(right_side *)> on_disconnect)
@@ -162,8 +144,6 @@ right_side::right_side(proxy_server *proxy, left_side *partner, std::function<vo
               }
           }),
           on_disconnect(on_disconnect),
-          on_read(false),
-          on_write(false),
           proxy(proxy),
           connected(false),
           request(std::move(partner->request)),
@@ -171,7 +151,7 @@ right_side::right_side(proxy_server *proxy, left_side *partner, std::function<vo
           right_side_timer(proxy->get_service().get_time_service(), CONNECTION_TIMEOUT, [this] {
               if (this->partner) {
                   this->partner->messages.push(http_wrapper::NOT_FOUND());
-                  this->partner->set_on_write(true);
+                  this->partner->ioEvent.add_flag(EPOLLOUT);
               }
               this->on_disconnect(this);
           })
@@ -201,7 +181,7 @@ void right_side::create_connection() {
         if (!err_flag) {
             socket.connect(&x, y);
             connected = true;
-            set_on_write(true);
+            ioEvent.add_flag(EPOLLOUT);
         } else {
             on_disconnect(this);
         }
@@ -232,8 +212,8 @@ void right_side::send_request() {
         if (ind != buf.size()) {
             rest = buf.substr(ind);
         } else {
-            set_on_read(true);
-            set_on_write(false);
+            ioEvent.add_flag(EPOLLIN);
+            ioEvent.remove_flag(EPOLLOUT);
         }
     } else {
         on_disconnect(this);
@@ -264,12 +244,12 @@ int right_side::read_response() {
                     cache_hit = false;
                     partner->messages.push(sub);
                 }
-                partner->set_on_write(true);
-                set_on_read(false);
+                partner->ioEvent.add_flag(EPOLLOUT);
+                ioEvent.remove_flag(EPOLLIN);
             } else if (response->get_state() == http_wrapper::BAD) {
                 partner->messages.push(sub);
-                partner->set_on_write(true);
-                set_on_read(false);
+                partner->ioEvent.add_flag(EPOLLOUT);
+                ioEvent.remove_flag(EPOLLIN);
             }
         } else {
             //Read after get cache
@@ -279,28 +259,6 @@ int right_side::read_response() {
         on_disconnect(this);
         return 1;
     }
-}
-
-void right_side::update_state() {
-    uint32_t flags = EPOLLERR | EPOLLHUP | EPOLLRDHUP;
-    if (on_read) {
-        flags |= EPOLLIN;
-    }
-    if (on_write) {
-        flags |= EPOLLOUT;
-    }
-    ioEvent.modify(flags);
-}
-
-
-void right_side::set_on_read(bool state) {
-    on_read = state;
-    update_state();
-}
-
-void right_side::set_on_write(bool state) {
-    on_write = state;
-    update_state();
 }
 
 void right_side::try_cache() {

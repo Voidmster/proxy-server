@@ -53,9 +53,6 @@ public:
 
     int read_request();
     void send_response();
-
-    void update_state();
-    void set_on_write(bool state);
 private:
     proxy_server* proxy;
     posix_socket socket;
@@ -64,8 +61,6 @@ private:
     std::unique_ptr<http_request> request;
     std::queue<std::string> messages;
     std::function<void(left_side*)> on_disconnect;
-    bool on_read;
-    bool on_write;
 
     std::set<right_side *> connected;
     timer left_side_timer;
@@ -81,10 +76,6 @@ public:
     void send_request();
     int read_response();
 
-    void update_state();
-    void set_on_read(bool state);
-    void set_on_write(bool state);
-
     void try_cache();
 private:
     proxy_server* proxy;
@@ -93,8 +84,6 @@ private:
     left_side* partner;
     std::unique_ptr<http_response> response;
     std::function<void(right_side*)> on_disconnect;
-    bool on_read;
-    bool on_write;
 
     size_t resolver_id;
     bool connected;

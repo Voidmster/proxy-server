@@ -1,5 +1,3 @@
-#include <iostream>
-#include <signal.h>
 #include "io_service.h"
 
 io_service::io_service() : finish(false) {
@@ -109,18 +107,31 @@ time_service &io_service::get_time_service() {
 io_event::io_event(io_service &service, file_descriptor &fd, uint32_t flags, std::function<void(uint32_t)> callback)
         : service(service),
           fd(fd),
-          callback(callback)
+          callback(callback),
+          flags(flags)
 {
     service.add(fd, this, flags);
 }
 
-void io_event::modify(uint32_t flags) {
-    service.modify(fd, this, flags | EPOLLERR | EPOLLRDHUP | EPOLLHUP);
+void io_event::add_flag(uint32_t flag) {
+    flags |= flag;
+    service.modify(fd, this, flags);
+}
+
+void io_event::remove_flag(uint32_t flag) {
+    flags &= ~flag;
+    service.modify(fd, this, flags);
 }
 
 io_event::~io_event() {
     service.remove(fd, this, 0);
 }
+
+
+
+
+
+
 
 
 

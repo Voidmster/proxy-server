@@ -1,8 +1,10 @@
 #ifndef PROXY_IO_SERVICE_H
 #define PROXY_IO_SERVICE_H
 
+#include <iostream>
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
+#include <signal.h>
 #include <unistd.h>
 #include <functional>
 #include <set>
@@ -41,9 +43,12 @@ class io_event{
     friend class io_service;
 public:
     io_event(io_service &service, file_descriptor &fd, uint32_t flags, std::function<void(uint32_t)>);
-    void modify(uint32_t flags);
     ~io_event();
+
+    void add_flag(uint32_t flag);
+    void remove_flag(uint32_t flag);
 private:
+    uint32_t flags;
     io_service &service;
     file_descriptor &fd;
     std::function<void(uint32_t)> callback;
