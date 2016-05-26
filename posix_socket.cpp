@@ -1,5 +1,4 @@
 #include <iostream>
-#include <sys/ioctl.h>
 #include "posix_socket.h"
 
 posix_socket::posix_socket(int domain, int type) : fd(create_socket_fd(domain, type)) {}
@@ -7,17 +6,11 @@ posix_socket::posix_socket(int domain, int type) : fd(create_socket_fd(domain, t
 posix_socket::~posix_socket() { }
 
 int posix_socket::get_flags() {
-    int result = fcntl(fd.get_fd(), F_GETFD);
-    if (result == -1) {
-        throw_error("Error in get_flags");
-    }
-    return result;
+    return fd.get_flags();
 }
 
-void posix_socket::set_flags(int nex_flags) {
-    if (fcntl(fd.get_fd(), F_GETFD, nex_flags) == -1) {
-        throw_error("Error in get_flags");
-    }
+void posix_socket::set_flags(uint32_t nex_flags) {
+    fd.set_flags(nex_flags);
 }
 
 void posix_socket::bind(sa_family_t sa_family, uint16_t port, in_addr_t s_addr) {
@@ -48,34 +41,15 @@ int posix_socket::accept() {
 }
 
 int posix_socket::get_available_bytes() {
-    int n;
-    if (ioctl(fd.get_fd(), FIONREAD, &n) == -1) {
-        throw_error("Error in read_some");
-    }
-
-    return n;
+    return fd.get_available_bytes();
 }
 
 ssize_t posix_socket::read_some(void *buffer, size_t size) {
-    ssize_t res = ::read(fd.get_fd(), buffer, size);
-    if (res == -1) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            throw_error("Error in read_some");
-        }
-    }
-
-    return res;
+    return fd.read_some(buffer, size);
 }
 
-ssize_t posix_socket::write_some(const char *buffer, size_t size) {
-    ssize_t res = ::write(fd.get_fd(), buffer, size);
-    if (res == -1) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            throw_error("Error in read_some");
-        }
-    }
-
-    return res;
+ssize_t posix_socket::write_some(void const *buffer, size_t size) {
+    return fd.write_some(buffer, size);
 }
 
 
@@ -97,12 +71,11 @@ void posix_socket::connect(sockaddr *adr, socklen_t addrlen) {
     }
 }
 
-int posix_socket::read_input(std::string &s) {
-    try {
+void posix_socket::read_input(std::string &s) {
+
         int n = get_available_bytes();
         if (n == 0) {
-            //No bytes are available
-            return -1;
+            throw_error("No bytes are available\n");
         }
 
         char buffer[n + 1];
@@ -110,14 +83,10 @@ int posix_socket::read_input(std::string &s) {
         buffer[n] = '\0';
 
         if (res == 0) {
-            return -1;
+            throw_error("EOF\n");
         }
 
         s = std::string(buffer, n);
-        return 1;
-    } catch (std::exception &e) {
-        return -1;
-    }
 }
 
 int posix_socket::create_socket_fd(int domain, int type) {

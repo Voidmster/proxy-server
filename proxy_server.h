@@ -11,6 +11,7 @@
 #include "http_wrappers.h"
 #include "dns_resolver.h"
 #include "io_service.h"
+#include "event_handler.h"
 
 
 const std::chrono::seconds SOCKET_TIMEOUT = std::chrono::seconds(600);
@@ -26,20 +27,21 @@ public:
     posix_socket& get_server();
     io_service& get_service();
 
-    dns_resolver& get_resolver();
-
     void create_new_left_side();
     void run();
 
-    right_side* create_new_right_side(left_side*);
+    void create_new_right_side(left_side*);
 private:
-    dns_resolver resolver;
     io_service service;
     http_server server;
     ipv4_endpoint endpoint;
     std::map<left_side*, std::unique_ptr <left_side> > left_sides;
     std::map<right_side*, std::unique_ptr <right_side> > right_sides;
+    std::map<uint64_t, left_side*> not_connected;
     lru_cache<std::string, http_response> proxy_cache;
+
+    event_handler handler;
+    dns_resolver resolver;
 
     int left_side_counter;
     int right_side_counter;
@@ -47,11 +49,12 @@ private:
 
 class left_side {
     friend class right_side;
+    friend class proxy_server;
 public:
     left_side(proxy_server *proxy, std::function<void(left_side*)> on_disconnect);
     ~left_side();
 
-    int read_request();
+    void read_request();
     void send_response();
 private:
     proxy_server* proxy;
@@ -62,6 +65,9 @@ private:
     std::queue<std::string> messages;
     std::function<void(left_side*)> on_disconnect;
 
+    void set_relations(right_side* p);
+    void send_smt_bad(std::string msg);
+
     std::set<right_side *> connected;
     timer left_side_timer;
 };
@@ -69,12 +75,11 @@ private:
 class right_side {
     friend class left_side;
 public:
-    right_side(proxy_server *proxy, left_side* partner, std::function<void(right_side*)> on_disconnect);
+    right_side(proxy_server *proxy, left_side* partner, sockaddr x, socklen_t y, std::function<void(right_side*)> on_disconnect);
     ~right_side();
 
-    void create_connection();
     void send_request();
-    int read_response();
+    void read_response();
 
     void try_cache();
 private:
@@ -85,8 +90,6 @@ private:
     std::unique_ptr<http_response> response;
     std::function<void(right_side*)> on_disconnect;
 
-    size_t resolver_id;
-    bool connected;
     std::unique_ptr<http_request> request;
     bool cache_hit;
     std::string host;

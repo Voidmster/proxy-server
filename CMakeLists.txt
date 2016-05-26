@@ -23,5 +23,5 @@ set(SOURCE_FILES
         dns_resolver.h
         file_descriptor.cpp
         file_descriptor.h
-        lru_cache.h time_service.cpp time_service.h)
+        lru_cache.h time_service.cpp time_service.h event_handler.cpp event_handler.h)
 add_executable(proxy_server ${SOURCE_FILES} main.cpp)

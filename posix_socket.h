@@ -21,11 +21,11 @@ public:
     int accept();
     int get_flags();
     int get_available_bytes();
-    int read_input(std::string &s);
+    void read_input(std::string &s);
 
     ssize_t read_some(void *buffer, size_t size);
-    ssize_t write_some(const char *buffer, size_t _size);
-    void set_flags(int nex_flags);
+    ssize_t write_some(void const *buffer, size_t _size);
+    void set_flags(uint32_t nex_flags);
     file_descriptor& get_fd();
     ~posix_socket();
 private:

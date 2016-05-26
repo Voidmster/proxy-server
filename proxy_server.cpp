@@ -5,10 +5,30 @@
 proxy_server::proxy_server(ipv4_endpoint endpoint)
         : endpoint(endpoint),
           server(service, endpoint, std::bind(&proxy_server::create_new_left_side, this)),
-          resolver(5),
+          resolver(&handler, 10),
           proxy_cache(" pages cached", 10000),
           left_side_counter(0),
-          right_side_counter(0)
+          right_side_counter(0),
+          handler(service, [this] () throw(std::runtime_error) {
+              auto res = resolver.get_last_result();
+              auto p = not_connected.find(res.id);
+              if (p == not_connected.end()) {
+                  std::cerr << "Error not connected\n";
+              } else {
+                  if (res.failed) {
+                      if (left_sides.find(p->second) != left_sides.end()) {
+                          p->second->send_smt_bad(http_wrapper::BAD_REQUEST());
+                      }
+                  } else {
+                      if (left_sides.find(p->second) != left_sides.end()) {
+                          res.callback(res.x, res.y);
+                      } else {
+                      }
+                  }
+                  not_connected.erase(res.id);
+                  resolver.return_id(res.id);
+              }
+          })
 {
     std::cerr << "Proxy server bind on " << server.get_local_endpoint().to_string() << "\n";
 }
@@ -22,7 +42,7 @@ io_service &proxy_server::get_service() {
 }
 
 void proxy_server::create_new_left_side() {
-    std::unique_ptr<left_side> u_ptr(new left_side(this, [this](left_side* item) {left_sides.erase(item);}));
+    std::unique_ptr<left_side> u_ptr(new left_side(this, [this](left_side* item) throw(std::runtime_error) {left_sides.erase(item);}));
     left_side *ptr = u_ptr.get();
     left_sides.emplace(ptr, std::move(u_ptr));
     if (++left_side_counter % 10 == 0) {
@@ -31,18 +51,15 @@ void proxy_server::create_new_left_side() {
 
 }
 
-right_side *proxy_server::create_new_right_side(left_side *caller) {
-    std::unique_ptr<right_side> u_ptr(new right_side(this, caller, [this](right_side* item) {right_sides.erase(item);}));
-    right_side *ptr = u_ptr.get();
-    right_sides.emplace(ptr, std::move(u_ptr));
-    if (++right_side_counter % 10 == 0) {
-        std::cerr << "> " << right_side_counter  << " right_sides created\n";
-    }
-    return ptr;
-}
-
-dns_resolver &proxy_server::get_resolver() {
-    return resolver;
+void proxy_server::create_new_right_side(left_side *caller) {
+    not_connected.emplace(resolver.resolve(caller->request->get_host(), [this, caller] (sockaddr x, socklen_t y) throw(std::runtime_error) {
+        std::unique_ptr<right_side> u_ptr(new right_side(this, caller, x, y, [this](right_side* item) {right_sides.erase(item);}));
+        right_side *ptr = u_ptr.get();
+        this->right_sides.emplace(ptr, std::move(u_ptr));
+        if (++this->right_side_counter % 10 == 0) {
+            std::cerr << "> " << right_side_counter  << " right_sides created\n";
+        }
+    }), caller);
 }
 
 void proxy_server::run() {
@@ -55,16 +72,21 @@ left_side::left_side(proxy_server *proxy, std::function<void(left_side*)> on_dis
           partner(nullptr),
           ioEvent(proxy->get_service(), socket.get_fd(), EPOLLIN, [this] (uint32_t events) mutable throw(std::runtime_error)
           {
-              if (events & EPOLLIN) {
-                  if (read_request()) { return;}
-              }
-              if (events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+              try {
+                  if (events & EPOLLIN) {
+                      read_request();
+                      return;
+                  }
+                  if (events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+                      this->on_disconnect(this);
+                  }
+                  if (events & EPOLLOUT) {
+                      send_response();
+                      return;
+                  }
+              } catch(std::runtime_error &e) {
                   this->on_disconnect(this);
               }
-              if (events & EPOLLOUT) {
-                  send_response();
-              }
-
           }),
           on_disconnect(on_disconnect),
           left_side_timer(proxy->get_service().get_time_service(), SOCKET_TIMEOUT, [this]() {
@@ -80,12 +102,11 @@ left_side::~left_side() {
     connected.clear();
 }
 
-int left_side::read_request() {
+void left_side::read_request() {
     std::string buffer;
-    if (socket.read_input(buffer) == -1) {
-        on_disconnect(this);
-        return 1;
-    }
+
+    socket.read_input(buffer);
+
 
     if (request.get() == nullptr) {
         request.reset(new http_request(buffer));
@@ -97,12 +118,9 @@ int left_side::read_request() {
         messages.push(http_wrapper::BAD_REQUEST());
         ioEvent.add_flag(EPOLLOUT);
     } else if (request->get_state() == http_request::FULL_BODY) {
-        partner = proxy->create_new_right_side(this);
-        connected.insert(partner);
-        request.release();
+        proxy->create_new_right_side(this);
         left_side_timer.change_time(SOCKET_TIMEOUT);
     }
-    return 0;
 }
 
 void left_side::send_response() {
@@ -123,40 +141,49 @@ void left_side::send_response() {
     }
 }
 
-right_side::right_side(proxy_server *proxy, left_side *partner, std::function<void(right_side *)> on_disconnect)
+void left_side::set_relations(right_side *p) {
+    partner = p;
+    connected.insert(p);
+}
+
+void left_side::send_smt_bad(std::string msg) {
+    messages.push(msg);
+    ioEvent.add_flag(EPOLLOUT);
+}
+
+
+right_side::right_side(proxy_server *proxy, left_side *partner, sockaddr x, socklen_t y, std::function<void(right_side *)> on_disconnect)
         : socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK),
           partner(partner),
-          ioEvent(proxy->get_service(), socket.get_fd(), 0, [this] (uint32_t events) mutable throw(std::runtime_error)
+          ioEvent(proxy->get_service(), socket.get_fd(), EPOLLOUT, [this] (uint32_t events) mutable throw(std::runtime_error)
           {
-              if (!connected && (events == EPOLLHUP)) {
-                  create_connection();
-                  return;
-              }
-              if (events & EPOLLIN) {
-                  if (read_response()) { return;}
-              }
-              if (events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+              try {
+                  if (events & EPOLLIN) {
+                      read_response();
+                  }
+                  if (events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+                      this->on_disconnect(this);
+                  }
+                  if (events & EPOLLOUT) {
+                      send_request();
+                  }
+              } catch(std::runtime_error &e) {
                   this->on_disconnect(this);
-                  return;
-              }
-              if (events & EPOLLOUT) {
-                  send_request();
               }
           }),
           on_disconnect(on_disconnect),
           proxy(proxy),
-          connected(false),
           request(std::move(partner->request)),
           cache_hit(false),
           right_side_timer(proxy->get_service().get_time_service(), CONNECTION_TIMEOUT, [this] {
               if (this->partner) {
-                  this->partner->messages.push(http_wrapper::NOT_FOUND());
-                  this->partner->ioEvent.add_flag(EPOLLOUT);
+                  this->partner->send_smt_bad(http_wrapper::NOT_FOUND());
               }
               this->on_disconnect(this);
           })
 {
-    resolver_id = this->proxy->get_resolver().resolve(request->get_host());
+    partner->set_relations(this);
+    socket.connect(&x, y);
 }
 
 right_side::~right_side() {
@@ -166,28 +193,8 @@ right_side::~right_side() {
             partner->partner = nullptr;
         }
     }
-    if (!connected) {
-        proxy->get_resolver().cancel(resolver_id);
-    }
     try_cache();
 }
-
-
-void right_side::create_connection() {
-    sockaddr x;
-    socklen_t y;
-    bool err_flag;
-    if (proxy->get_resolver().result_is_ready(resolver_id, x, y, err_flag)) {
-        if (!err_flag) {
-            socket.connect(&x, y);
-            connected = true;
-            ioEvent.add_flag(EPOLLOUT);
-        } else {
-            on_disconnect(this);
-        }
-    }
-}
-
 
 void right_side::send_request() {
     if (partner != nullptr) {
@@ -216,18 +223,16 @@ void right_side::send_request() {
             ioEvent.remove_flag(EPOLLOUT);
         }
     } else {
-        on_disconnect(this);
+        throw_error("No partner");
     }
 }
 
-int right_side::read_response() {
+void right_side::read_response() {
     if (partner != nullptr) {
         std::string buffer;
 
-        if (socket.read_input(buffer) == -1) {
-            on_disconnect(this);
-            return 1;
-        }
+        socket.read_input(buffer);
+
         std::string sub(buffer);
         if (!read_after_cache_hit) {
             if (response.get() == nullptr) {
@@ -254,10 +259,8 @@ int right_side::read_response() {
         } else {
             //Read after get cache
         }
-        return 0;
     } else {
-        on_disconnect(this);
-        return 1;
+        throw_error("No partner");
     }
 }
 

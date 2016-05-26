@@ -3,10 +3,11 @@
 #include <string.h>
 #include "dns_resolver.h"
 
-dns_resolver::dns_resolver(size_t threads_count)
+dns_resolver::dns_resolver(event_handler *handler, size_t threads_count)
         : threads_count(threads_count),
           dns_cache(" addresses cached", 1000),
-          finish(false)
+          finish(false),
+          handler(handler)
 {
     for (int i = 0; i < threads_count; i++) {
         workers.push_back(std::thread(&dns_resolver::worker, this));
@@ -15,35 +16,31 @@ dns_resolver::dns_resolver(size_t threads_count)
 
 void dns_resolver::worker() {
     while (!finish) {
-        std::unique_lock<std::mutex> locker_t(t_queue_mutex);
-        condition.wait(locker_t, [&]{ return (!t_queue.empty() || finish);});
+        std::unique_lock<std::mutex> tasks_locker(tasks_mutex);
+        condition.wait(tasks_locker, [&]{ return (!tasks.empty() || finish);});
         if (finish) {
             break;
         }
 
-        auto p = t_queue.front();
-        t_queue.pop();
-        locker_t.unlock();
+        auto p = tasks.front();
+        tasks.pop();
+        tasks_locker.unlock();
 
         bool err_flag = false;
         sockaddr x;
         socklen_t y;
 
         std::unique_lock<std::mutex> cache_locker(cache_mutex);
-        bool hit = dns_cache.contains(p.first);
+        bool hit = dns_cache.contains(p.first.second);
         if (hit) {
-            auto node = dns_cache.get(p.first);
-            if (node.resolved) {
-                x = node.result.first;
-                y = node.result.second;
-            } else {
-                err_flag = false;
-            }
+            auto node = dns_cache.get(p.first.second);
+            x = node.result.first;
+            y = node.result.second;
         }
         cache_locker.unlock();
 
         if (!hit) {
-            std::string host(p.first);
+            std::string host(p.first.second);
             std::string port("80");
 
             auto i = host.find(":");
@@ -70,9 +67,7 @@ void dns_resolver::worker() {
 
             cache_locker.lock();
             dns_cache_node new_node;
-            if (err_flag) {
-                new_node.resolved = false;
-            } else {
+            if (!err_flag) {
                 new_node.result.first = x;
                 new_node.result.second = y;
             }
@@ -80,25 +75,15 @@ void dns_resolver::worker() {
             cache_locker.unlock();
         }
 
-        std::unique_lock<std::mutex> locker_v(vector_mutex);
-        if (place_vector[p.second].is_canceled()) {
-            place_vector[p.second].reset();
-            locker_v.unlock();
-            std::unique_lock<std::mutex> locker_fp_q(fp_queue_mutex);
-            fp_queue.push(p.second);
-            locker_fp_q.unlock();
-        } else {
-            if (err_flag) {
-                place_vector[p.second].corrupt();
-            }
-            place_vector[p.second].set_result(x, y);
-            locker_v.unlock();
-        }
+        std::unique_lock<std::mutex> results_locker(resuts_mutex);
+        results.emplace(p.first.first, x, y, err_flag, p.second);
+        uint64_t i = 1;
+        handler->get_fd().write_some(&i, sizeof(i));
     }
 }
 
 dns_resolver::~dns_resolver() {
-    std::unique_lock<std::mutex> locker_t(t_queue_mutex);
+    std::unique_lock<std::mutex> locker_t(tasks_mutex);
     finish = true;
     locker_t.unlock();
     condition.notify_all();
@@ -107,93 +92,51 @@ dns_resolver::~dns_resolver() {
     }
 }
 
-size_t dns_resolver::resolve(std::string const &host) {
-    bool flag = false;
-    size_t x;
-
-    std::unique_lock<std::mutex> locker_fp_q(fp_queue_mutex);
-    if (!fp_queue.empty()) {
-        flag = true;
-        x = fp_queue.front();
-        fp_queue.pop();
-    }
-    locker_fp_q.unlock();
-
-    if (!flag) {
-        std::unique_lock<std::mutex> locker_v(vector_mutex);
-        x = place_vector.size();
-        place_vector.emplace_back();
-        locker_v.unlock();
-    }
-
-    std::unique_lock<std::mutex> locker_t_q(t_queue_mutex);
-    t_queue.push(std::make_pair(host, x));
-    locker_t_q.unlock();
-
+uint64_t dns_resolver::resolve(std::string const &host, callback_t callback) {
+    uint64_t x = poll.get_id();
+    std::unique_lock<std::mutex> locker(tasks_mutex);
+    tasks.push(std::make_pair(std::make_pair(x, host), std::move(callback)));
     condition.notify_one();
-
+    locker.unlock();
     return x;
 }
 
-bool dns_resolver::result_is_ready(size_t id, sockaddr& x, socklen_t &y, bool &err_flag) {
-    std::unique_lock<std::mutex> locker_v(vector_mutex);
-    if (place_vector[id].get_result() == nullptr) {
-        return false;
-    } else {
-        x = place_vector[id].get_result()->first;
-        y = place_vector[id].get_result()->second;
-        err_flag = place_vector[id].is_corrupted();
-        return true;
+handler_entry dns_resolver::get_last_result() {
+    std::unique_lock<std::mutex> results_locker(resuts_mutex);
+    auto res = results.front();
+    results.pop();
+    results_locker.unlock();
+
+    return res;
+}
+
+void dns_resolver::return_id(uint64_t id) {
+    poll.insert_id(id);
+}
+
+
+id_poll::id_poll() : counter(0)
+{
+    poll.push(counter);
+}
+
+uint64_t id_poll::get_id() {
+    uint64_t id;
+    std::unique_lock<std::mutex> locker(mutex);
+    if (poll.empty()) {
+        poll.push(++counter);
     }
+    id = poll.front();
+    poll.pop();
+    locker.unlock();
+
+    return id;
 }
 
-void dns_resolver::cancel(size_t id) {
-    std::unique_lock<std::mutex> locker_v(vector_mutex);
-    if (place_vector[id].get_result() == nullptr) {
-        place_vector[id].cancel();
-        locker_v.unlock();
-    } else {
-        place_vector[id].reset();
-        locker_v.unlock();
-        std::unique_lock<std::mutex> locker_fp_q(fp_queue_mutex);
-        fp_queue.push(id);
-        locker_fp_q.unlock();
-    }
+void id_poll::insert_id(uint64_t id) {
+    std::unique_lock<std::mutex> locker(mutex);
+    poll.push(id);
 }
-
-
-void dns_resolver::state::set_result(sockaddr x, socklen_t y) {
-    result.reset(new std::pair<sockaddr,socklen_t>(x, y));
-}
-
-std::unique_ptr<std::pair<sockaddr, socklen_t>> &dns_resolver::state::get_result() {
-    return result;
-}
-
-void dns_resolver::state::cancel() {
-    canceled = true;
-}
-
-void dns_resolver::state::reset() {
-    result.reset(nullptr);
-    corrupted = false;
-    canceled = false;
-}
-
-bool dns_resolver::state::is_canceled() {
-    return canceled;
-}
-
-bool dns_resolver::state::is_corrupted() {
-    return corrupted;
-}
-
-void dns_resolver::state::corrupt() {
-    corrupted = true;
-}
-
-
-
 
 
 
