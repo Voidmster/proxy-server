@@ -7,6 +7,8 @@
 #include <map>
 #include <set>
 #include <queue>
+#include <iostream>
+#include <bits/unique_ptr.h>
 #include "http_server.h"
 #include "http_wrappers.h"
 #include "dns_resolver.h"

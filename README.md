@@ -1,1 +1,1 @@
-# simple proxy server
+# simple http proxy server

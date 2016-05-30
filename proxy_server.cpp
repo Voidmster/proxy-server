@@ -1,5 +1,3 @@
-#include <iostream>
-#include <bits/unique_ptr.h>
 #include "proxy_server.h"
 
 proxy_server::proxy_server(ipv4_endpoint endpoint)
@@ -13,7 +11,7 @@ proxy_server::proxy_server(ipv4_endpoint endpoint)
               auto res = resolver.get_last_result();
               auto p = not_connected.find(res.id);
               if (p == not_connected.end()) {
-                  std::cerr << "Error not connected\n";
+                  // Error not connected
               } else {
                   if (res.failed) {
                       if (left_sides.find(p->second) != left_sides.end()) {
@@ -48,7 +46,6 @@ void proxy_server::create_new_left_side() {
     if (++left_side_counter % 10 == 0) {
         std::cerr << "> " << left_side_counter  << " left_sides created\n";
     }
-
 }
 
 void proxy_server::create_new_right_side(left_side *caller) {
@@ -75,14 +72,13 @@ left_side::left_side(proxy_server *proxy, std::function<void(left_side*)> on_dis
               try {
                   if (events & EPOLLIN) {
                       read_request();
-                      return;
                   }
                   if (events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
                       this->on_disconnect(this);
+                      return;
                   }
                   if (events & EPOLLOUT) {
                       send_response();
-                      return;
                   }
               } catch(std::runtime_error &e) {
                   this->on_disconnect(this);
@@ -107,7 +103,6 @@ void left_side::read_request() {
 
     socket.read_input(buffer);
 
-
     if (request.get() == nullptr) {
         request.reset(new http_request(buffer));
     } else {
@@ -124,6 +119,7 @@ void left_side::read_request() {
 }
 
 void left_side::send_response() {
+    left_side_timer.change_time(SOCKET_TIMEOUT);
     while (!messages.empty()) {
         ssize_t ind = socket.write_some(messages.front().c_str(), messages.front().size());
         if (ind != messages.front().size()) {
@@ -163,6 +159,7 @@ right_side::right_side(proxy_server *proxy, left_side *partner, sockaddr x, sock
                   }
                   if (events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
                       this->on_disconnect(this);
+                      return;
                   }
                   if (events & EPOLLOUT) {
                       send_request();
@@ -182,12 +179,12 @@ right_side::right_side(proxy_server *proxy, left_side *partner, sockaddr x, sock
               this->on_disconnect(this);
           })
 {
-    partner->set_relations(this);
+    this->partner->set_relations(this);
     socket.connect(&x, y);
 }
 
 right_side::~right_side() {
-    if (partner != nullptr){
+    if (partner){
         partner->connected.erase(this);
         if (partner->partner == this) {
             partner->partner = nullptr;
@@ -197,7 +194,7 @@ right_side::~right_side() {
 }
 
 void right_side::send_request() {
-    if (partner != nullptr) {
+    if (partner) {
         std::string buf;
         if (rest.empty()) {
             right_side_timer.stop();
@@ -228,7 +225,7 @@ void right_side::send_request() {
 }
 
 void right_side::read_response() {
-    if (partner != nullptr) {
+    if (partner) {
         std::string buffer;
 
         socket.read_input(buffer);

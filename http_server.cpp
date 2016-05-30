@@ -12,7 +12,6 @@ http_server::http_server(io_service &service, ipv4_endpoint &endpoint, std::func
           }),
           on_accept(on_accept)
 {
-    std::cerr << "Server socket created\n";
     socket.bind(AF_INET, endpoint.port(), endpoint.addrnet());
     socket.listen();
 }

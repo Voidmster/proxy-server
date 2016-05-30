@@ -72,21 +72,20 @@ void posix_socket::connect(sockaddr *adr, socklen_t addrlen) {
 }
 
 void posix_socket::read_input(std::string &s) {
+    int n = get_available_bytes();
+    if (n == 0) {
+        throw_error("No bytes are available\n");
+    }
 
-        int n = get_available_bytes();
-        if (n == 0) {
-            throw_error("No bytes are available\n");
-        }
+    char buffer[n + 1];
+    ssize_t res = read_some(buffer, n);
+    buffer[n] = '\0';
 
-        char buffer[n + 1];
-        ssize_t res = read_some(buffer, n);
-        buffer[n] = '\0';
+    if (res == 0) {
+        throw_error("EOF\n");
+    }
 
-        if (res == 0) {
-            throw_error("EOF\n");
-        }
-
-        s = std::string(buffer, n);
+    s = std::string(buffer, n);
 }
 
 int posix_socket::create_socket_fd(int domain, int type) {

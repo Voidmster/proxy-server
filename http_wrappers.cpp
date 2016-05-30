@@ -90,9 +90,13 @@ http_request::http_request(std::string text) : http_wrapper(text) {
 
 std::string http_request::get_URI()
 {
-    if (URI.find(host) != -1) {
+    if (URI.find("http://") == 0) {
+        URI = URI.substr(URI.find("http://") + 7);
+    }
+    if (URI.find(host) == 0) {
         URI = URI.substr(URI.find(host) + host.size());
     }
+
     return URI;
 }
 
