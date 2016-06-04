@@ -13,7 +13,7 @@
 #include "posix_socket.h"
 #include "time_service.h"
 
-const int DEFAULT_EPOLL_TIMEOUT = 1000;
+const int DEFAULT_EPOLL_TIMEOUT = 100000;
 const int MAX_EPOLL_EVENTS_COUNT = 1000;
 
 class io_event;

@@ -15,6 +15,9 @@ dns_resolver::dns_resolver(event_handler *handler, size_t threads_count)
 }
 
 void dns_resolver::worker() {
+    sigset_t mask;
+    sigfillset(&mask);
+    sigprocmask(SIG_BLOCK, &mask, nullptr);
     while (!finish) {
         std::unique_lock<std::mutex> tasks_locker(tasks_mutex);
         condition.wait(tasks_locker, [&]{ return (!tasks.empty() || finish);});

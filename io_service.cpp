@@ -60,7 +60,7 @@ file_descriptor io_service::create_signal_fd(std::vector<uint8_t> signals) {
 void io_service::run() {
     file_descriptor signal_fd = create_signal_fd({SIGINT, SIGTERM});
     io_event signal_event(*this, signal_fd, EPOLLIN, [this](uint32_t) {
-        perror("We get SIGNAL\n");
+        perror("Signal caught\n");
         this->finish = true;
     });
 
